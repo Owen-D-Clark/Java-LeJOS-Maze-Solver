@@ -1,0 +1,157 @@
+import lejos.hardware.motor.EV3LargeRegulatedMotor;
+import lejos.hardware.port.MotorPort;
+import lejos.hardware.port.SensorPort;
+import lejos.hardware.sensor.EV3UltrasonicSensor;
+import lejos.hardware.sensor.EV3GyroSensor;
+import lejos.hardware.sensor.SensorMode;
+import lejos.hardware.Button;
+import lejos.robotics.SampleProvider;
+import lejos.utility.Delay;
+
+public class PledgeMazeSolver {
+
+    // Motors
+    static EV3LargeRegulatedMotor leftMotor =
+            new EV3LargeRegulatedMotor(MotorPort.A);
+    static EV3LargeRegulatedMotor rightMotor =
+            new EV3LargeRegulatedMotor(MotorPort.B);
+
+    // Sensors
+    static EV3UltrasonicSensor frontUS =
+            new EV3UltrasonicSensor(SensorPort.S1);
+    static EV3UltrasonicSensor leftUS =
+            new EV3UltrasonicSensor(SensorPort.S2);
+    static EV3GyroSensor gyro =
+            new EV3GyroSensor(SensorPort.S3);
+    
+    static SampleProvider frontDistance = frontUS.getDistanceMode();
+    static SampleProvider leftDistance = leftUS.getDistanceMode();
+    static SampleProvider gyroMode = gyro.getAngleMode();
+
+    static float[] frontSample = new float[1];
+    static float[] leftSample = new float[1];
+    static float[] gyroSample = new float[1];
+
+    static double goalHeading = 0;
+    static int cumulativeAngle = 0;
+
+    static final float WALL_DISTANCE = 0.25f;
+    static final float FRONT_THRESHOLD = 0.20f;
+
+    public static void main(String[] args) {
+
+        gyro.reset();
+        goalHeading = 0;
+
+        leftMotor.setSpeed(200);
+        rightMotor.setSpeed(200);
+
+        while (!Button.ESCAPE.isDown()) {
+
+            if (!frontBlocked()) {
+                driveStraightWithGyro(goalHeading);
+            } else {
+                wallFollow();
+            }
+        }
+
+        closeAll();
+    }
+
+    //Driving Stability
+    static void driveStraightWithGyro(double heading) {
+
+        while (!frontBlocked()) {
+
+            double error = heading - getGyroAngle();
+            double correction = error * 2; // proportional control
+
+            leftMotor.setSpeed((int)(200 + correction));
+            rightMotor.setSpeed((int)(200 - correction));
+
+            leftMotor.forward();
+            rightMotor.forward();
+
+            Delay.msDelay(20);
+        }
+
+        leftMotor.stop(true);
+        rightMotor.stop();
+    }
+
+    //Left Wall Follower
+    static void wallFollow() {
+
+        cumulativeAngle = 0;
+
+        turnRight90();
+        cumulativeAngle -= 90;
+
+        while (true) {
+
+            if (!frontBlocked() && cumulativeAngle == 0
+                    && Math.abs(getGyroAngle() - goalHeading) < 5) {
+                return;
+            }
+
+            if (leftOpen()) {
+                turnLeft90();
+                cumulativeAngle += 90;
+            } else if (frontBlocked()) {
+                turnRight90();
+                cumulativeAngle -= 90;
+            } else {
+                driveForwardStep();
+            }
+        }
+    }
+
+    //Movement Helper Functions
+    static void driveForwardStep() {
+        leftMotor.forward();
+        rightMotor.forward();
+        Delay.msDelay(200);
+        leftMotor.stop(true);
+        rightMotor.stop();
+    }
+
+    static void turnLeft90() {
+        leftMotor.rotate(-180, true);
+        rightMotor.rotate(180);
+        resetGyroAfterTurn();
+    }
+
+    static void turnRight90() {
+        leftMotor.rotate(180, true);
+        rightMotor.rotate(-180);
+        resetGyroAfterTurn();
+    }
+
+    static void resetGyroAfterTurn() {
+        Delay.msDelay(200);
+    }
+
+    //Sensor Helpers
+    static boolean frontBlocked() {
+        frontDistance.fetchSample(frontSample, 0);
+        return frontSample[0] < FRONT_THRESHOLD;
+    }
+
+    static boolean leftOpen() {
+        leftDistance.fetchSample(leftSample, 0);
+        return leftSample[0] > WALL_DISTANCE;
+    }
+
+    static float getGyroAngle() {
+        gyroMode.fetchSample(gyroSample, 0);
+        return gyroSample[0];
+    }
+
+    static void closeAll() {
+        leftMotor.close();
+        rightMotor.close();
+        frontUS.close();
+        leftUS.close();
+        gyro.close();
+    }
+}
